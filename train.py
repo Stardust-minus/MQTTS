@@ -111,7 +111,7 @@ wrapper = Trainer(
     use_distributed_sampler=False,
     accumulate_grad_batches=args.accumulate_grad_batches,
     logger=logger,
-    check_val_every_n_epoch=args.check_val_every_n_epoch
+    check_val_every_n_epoch=None
 )
 model = Wav2TTS(args)
 wrapper.fit(model, ckpt_path=args.resume_checkpoint)

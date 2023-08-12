@@ -1,22 +1,17 @@
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint
 from tester import Wav2TTS_infer
 import argparse
-from dp.phonemizer import Phonemizer
 import soundfile as sf
 import pyloudnorm as pyln
 import os
 from pathlib import Path
 import json
-import numpy as np
-from collections import Counter
 
 from text import symbols
+from text.cleaner import clean_text
 
 parser = argparse.ArgumentParser()
 
 #Path
-parser.add_argument('--phonemizer_dict_path', type=str, required=True)
 parser.add_argument('--outputdir', type=str, required=True)
 parser.add_argument('--model_path', type=str, required=True)
 parser.add_argument('--input_path', type=str, required=True)
@@ -57,7 +52,6 @@ with open(args.config_path, 'r') as f:
 if __name__ == '__main__':
     Path(args.outputdir).mkdir(parents=True, exist_ok=True)
     meter = pyln.Meter(args.sample_rate)
-    phonemizer = Phonemizer.from_checkpoint(args.phonemizer_dict_path)
     with open(args.input_path, 'r') as f:
         input_file = json.load(f)
     model = Wav2TTS_infer(args)
@@ -65,8 +59,8 @@ if __name__ == '__main__':
     model.vocoder.generator.remove_weight_norm()
     model.vocoder.encoder.remove_weight_norm()
     model.eval()
-    i_wavs, i_phones, written = [], [], 0
-    for i, (speaker_path, sentence) in enumerate(input_file):
+    i_wavs,sids, i_phones, written = [], [], [], 0
+    for i, (speaker_path, sid, sentence) in enumerate(input_file):
         if args.spkr_embedding_path:
             i_wavs.append(os.path.join(args.spkr_embedding_path, os.path.basename(speaker_path)[:-4] + '.npy'))
         else:
@@ -75,16 +69,16 @@ if __name__ == '__main__':
             loudness = meter.integrated_loudness(audio)
             audio = pyln.normalize.loudness(audio, loudness, -20.0)
             i_wavs.append(audio)
-        phones = phonemizer(sentence.strip().lower(), lang='en_us').replace('[', ' ').replace(']', ' ').split()
-        phones = [''.join(i for i in phone if not i.isdigit()) for phone in phones if phone.strip()]
+        phones = clean_text(sentence)
+        sids.append(int(sid))
         i_phones.append(phones)
         if len(i_wavs) == args.batch_size:
             print (f"Inferencing batch {written//args.batch_size+1}, total {len(input_file)//args.batch_size+1} baches.")
-            synthetic = model(i_wavs, i_phones)
+            synthetic = model(i_wavs,sids, i_phones)
             for s in synthetic:
                 sf.write(os.path.join(args.outputdir, f'sentence-{written+1}-1.wav'), s, args.sample_rate)
                 written += 1
-            i_wavs, i_phones = [], []
+            i_wavs,sids, i_phones = [],[], []
     if len(i_wavs) > 0:
         synthetic = model(i_wavs, i_phones)
         for s in synthetic:

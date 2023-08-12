@@ -35,6 +35,10 @@ def train(rank, a, h):
     encoder = Encoder(h).to(device)
     generator = Generator(h).to(device)
     quantizer = Quantizer(h).to(device)
+    for param in encoder.parameters():
+        param.requires_grad = False
+    for param in quantizer.parameters():
+        param.requires_grad = False
     mpd = MultiPeriodDiscriminator().to(device)
     msd = MultiScaleDiscriminator().to(device)
 
@@ -71,13 +75,21 @@ def train(rank, a, h):
         mpd = DistributedDataParallel(mpd, device_ids=[rank]).to(device)
         msd = DistributedDataParallel(msd, device_ids=[rank]).to(device)
 
-    optim_g = torch.optim.Adam(itertools.chain(generator.parameters(), encoder.parameters(), quantizer.parameters()),
+    optim_g = torch.optim.Adam(generator.parameters(),
                                 h.learning_rate, betas=[h.adam_b1, h.adam_b2])
     optim_d = torch.optim.Adam(itertools.chain(msd.parameters(), mpd.parameters()),
                                 h.learning_rate, betas=[h.adam_b1, h.adam_b2])
 
     if state_dict_do is not None:
-        optim_g.load_state_dict(state_dict_do['optim_g'])
+        try:
+            optim_g.load_state_dict(state_dict_do['optim_g'])
+        except:
+            new_opt_dict = optim_g.state_dict()
+            new_opt_dict_params = new_opt_dict['param_groups'][0]['params']
+            new_opt_dict['param_groups'] = state_dict_do['optim_g']['param_groups']
+            new_opt_dict['param_groups'][0]['params'] = new_opt_dict_params
+            optim_g.load_state_dict(new_opt_dict)
+            print("Cannot load optim_g")
         optim_d.load_state_dict(state_dict_do['optim_d'])
 
     scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=h.lr_decay, last_epoch=last_epoch)
